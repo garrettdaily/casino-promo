@@ -12,12 +12,16 @@ RESPONSE_DAYS = 14  # response window: assigned_date + 0 to 13 days
 PRE_DAYS = 28  # look-back period before assignment
 
 
-def _result(table, check, flagged, id_col):
-    """Build one row of the findings table from the rows that failed a check."""
+def _result(table, check, flagged, id_col, severity="error"):
+    """Build one row of the findings table from the rows that failed a check.
+
+    severity "error" = must be fixed before analysis; "warning" = allowed, but reported.
+    """
     ids = flagged[id_col].astype(str).unique()
     return {
         "table": table,
         "check": check,
+        "severity": severity,
         "rows_flagged": len(flagged),
         "example_ids": ", ".join(ids[:5]),
     }
@@ -68,8 +72,8 @@ def run_checks(tables):
                            va[va["assigned_date"].notna() & (va["property"] != va["property_assigned"])],
                            "visit_id"))
     results.append(_result("visits", "outside pre-period and response window",
-                           va[(days < -PRE_DAYS) | (days >= RESPONSE_DAYS)], "visit_id"))
-
+                                                      va[(days < -PRE_DAYS) | (days >= RESPONSE_DAYS)], "visit_id",
+                           severity="warning"))
     # ---------- redemptions ----------
     results += _duplicate_checks(r, "redemptions", "redemption_id")
 
