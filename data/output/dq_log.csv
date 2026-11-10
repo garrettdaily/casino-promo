@@ -1,0 +1,16 @@
+table,record_id,issue,action,decision
+assignments,A000010,exact duplicate row,removed extra copy,D1
+assignments,A000020,"same ID, conflicting values",excluded player,D2
+assignments,A024001,missing player_segment,excluded player,D3
+visits,V000010,exact duplicate row,removed extra copy,D1
+visits,V000020,"same ID, conflicting values",removed all copies,D4
+visits,V999001,player not in assignments,removed,D5
+visits,V000025,player excluded (D2/D3),removed with player,D2/D3
+visits,V999002,outside pre-period and response window,"kept, labeled 'outside'",D6
+redemptions,R000010,exact duplicate row,removed extra copy,D1
+redemptions,R000020,"same ID, conflicting values",removed copy whose cost doesn't match the offer value,D7
+redemptions,R999001,assignment_id not found,removed,D9
+redemptions,R999002,redeemed by a holdout player,removed redemption; player kept in holdout group,D10
+redemptions,R999003,"visit doesn't match the assignment's player, property or window",removed,D11
+redemptions,R999005,more than one redemption per assignment,removed; kept the earliest,D8
+redemptions,R999004,negative promo_cost,cost set to offer value,D12

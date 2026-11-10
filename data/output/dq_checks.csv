@@ -1,0 +1,43 @@
+table,check,severity,rows_flagged,example_ids,stage
+assignments,exact duplicate row,error,1,A000010,raw
+assignments,"same ID, conflicting values",error,2,A000020,raw
+assignments,missing player_segment,error,1,A024001,raw
+assignments,player has more than one assignment,error,0,,raw
+assignments,offer_value blank for offer / filled for holdout,error,0,,raw
+visits,exact duplicate row,error,1,V000010,raw
+visits,"same ID, conflicting values",error,2,V000020,raw
+visits,player not in assignments,error,1,V999001,raw
+visits,property differs from assigned property,error,0,,raw
+visits,outside pre-period and response window,warning,1,V999002,raw
+redemptions,exact duplicate row,error,1,R000010,raw
+redemptions,"same ID, conflicting values",error,2,R000020,raw
+redemptions,assignment_id not found,error,1,R999001,raw
+redemptions,visit_id not found,error,0,,raw
+redemptions,redeemed by a holdout player,error,1,R999002,raw
+redemptions,visit belongs to a different player,error,1,R999003,raw
+redemptions,visit at a different property,error,1,R999003,raw
+redemptions,visit outside response window,error,0,,raw
+redemptions,more than one redemption per assignment,error,4,"R000001, R000020, R999005",raw
+redemptions,negative promo_cost,error,1,R999004,raw
+redemptions,promo_cost differs from offer_value,error,3,"R000020, R999003, R999004",raw
+assignments,exact duplicate row,error,0,,clean
+assignments,"same ID, conflicting values",error,0,,clean
+assignments,missing player_segment,error,0,,clean
+assignments,player has more than one assignment,error,0,,clean
+assignments,offer_value blank for offer / filled for holdout,error,0,,clean
+visits,exact duplicate row,error,0,,clean
+visits,"same ID, conflicting values",error,0,,clean
+visits,player not in assignments,error,0,,clean
+visits,property differs from assigned property,error,0,,clean
+visits,outside pre-period and response window,warning,1,V999002,clean
+redemptions,exact duplicate row,error,0,,clean
+redemptions,"same ID, conflicting values",error,0,,clean
+redemptions,assignment_id not found,error,0,,clean
+redemptions,visit_id not found,error,0,,clean
+redemptions,redeemed by a holdout player,error,0,,clean
+redemptions,visit belongs to a different player,error,0,,clean
+redemptions,visit at a different property,error,0,,clean
+redemptions,visit outside response window,error,0,,clean
+redemptions,more than one redemption per assignment,error,0,,clean
+redemptions,negative promo_cost,error,0,,clean
+redemptions,promo_cost differs from offer_value,error,0,,clean
