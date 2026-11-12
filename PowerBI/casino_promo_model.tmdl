@@ -1,0 +1,655 @@
+createOrReplace
+
+	model Model
+		culture: en-US
+		defaultPowerBIDataSourceVersion: powerBI_V3
+		sourceQueryCulture: en-US
+		dataAccessOptions
+			legacyRedirects
+			returnErrorValuesAsNull
+
+		/// Folder containing the pipeline's output CSVs (data/output). Change it in Transform data > Edit parameters, then Refresh.
+		expression DataFolder = "C:\Users\garre\Projects\casino-promo\data\output" meta [IsParameterQuery = true, Type = "Text", IsParameterQueryRequired = true]
+			annotation PBI_ResultType = Text
+
+		/// One row per player (campaign assignment): who was offered or held out, and their activity before and during the 14-day response window. The main analysis table. Source: player_summary.csv.
+		table 'Player Summary'
+
+			/// Unique ID of the player's campaign assignment. Key to Redemptions.
+			column 'assignment_id'
+				dataType: string
+				summarizeBy: none
+				sourceColumn: assignment_id
+
+				annotation SummarizationSetBy = User
+
+			/// Unique player ID. Each player has exactly one assignment. Key to Visits.
+			column 'player_id'
+				dataType: string
+				summarizeBy: none
+				sourceColumn: player_id
+
+				annotation SummarizationSetBy = User
+
+			/// Campaign: Weekend Match, Dining Credit, Midweek Play or New Member Welcome.
+			column 'campaign_name'
+				dataType: string
+				summarizeBy: none
+				sourceColumn: campaign_name
+
+				annotation SummarizationSetBy = User
+
+			/// Casino property the player was assigned at (Harbor Casino or Ridge Casino).
+			column 'property'
+				dataType: string
+				summarizeBy: none
+				sourceColumn: property
+
+				annotation SummarizationSetBy = User
+
+			/// Player segment: New, Core or VIP.
+			column 'player_segment'
+				dataType: string
+				summarizeBy: none
+				sourceColumn: player_segment
+				sortByColumn: segment_order
+
+				annotation SummarizationSetBy = User
+
+			/// Offer = received the offer; Holdout = randomly held out for comparison.
+			column 'group'
+				dataType: string
+				summarizeBy: none
+				sourceColumn: group
+
+				annotation SummarizationSetBy = User
+
+			/// Dollar value of the offer. Blank for holdout players.
+			column 'offer_value'
+				dataType: double
+				formatString: \$#,0.00;-\$#,0.00;\$#,0.00
+				summarizeBy: none
+				sourceColumn: offer_value
+
+				annotation SummarizationSetBy = User
+				annotation PBI_FormatHint = {"currencyCulture":"en-US"}
+
+			/// Gaming revenue in the 28 days before assignment. Used to check the groups started out alike.
+			column 'pre_revenue'
+				dataType: double
+				formatString: \$#,0.00;-\$#,0.00;\$#,0.00
+				summarizeBy: sum
+				sourceColumn: pre_revenue
+
+				annotation SummarizationSetBy = User
+				annotation PBI_FormatHint = {"currencyCulture":"en-US"}
+
+			/// Gaming revenue in the 14-day response window. Can be negative when a player wins.
+			column 'response_revenue'
+				dataType: double
+				formatString: \$#,0.00;-\$#,0.00;\$#,0.00
+				summarizeBy: sum
+				sourceColumn: response_revenue
+
+				annotation SummarizationSetBy = User
+				annotation PBI_FormatHint = {"currencyCulture":"en-US"}
+
+			/// Cost of the player's redemption; 0 if they did not redeem.
+			column 'promo_cost'
+				dataType: double
+				formatString: \$#,0.00;-\$#,0.00;\$#,0.00
+				summarizeBy: sum
+				sourceColumn: promo_cost
+
+				annotation SummarizationSetBy = User
+				annotation PBI_FormatHint = {"currencyCulture":"en-US"}
+
+			/// TRUE if the player visited during the 14-day response window.
+			column 'returned'
+				dataType: boolean
+				summarizeBy: none
+				sourceColumn: returned
+
+				annotation SummarizationSetBy = User
+
+			/// TRUE if the player redeemed their offer (offer group only).
+			column 'redeemed'
+				dataType: boolean
+				summarizeBy: none
+				sourceColumn: redeemed
+
+				annotation SummarizationSetBy = User
+
+			/// Response-window revenue minus promo cost.
+			column 'net_revenue'
+				dataType: double
+				formatString: \$#,0.00;-\$#,0.00;\$#,0.00
+				summarizeBy: sum
+				sourceColumn: net_revenue
+
+				annotation SummarizationSetBy = User
+				annotation PBI_FormatHint = {"currencyCulture":"en-US"}
+
+			/// Hidden helper that sorts player_segment as New, Core, VIP (All = 0).
+			column 'segment_order'
+				dataType: int64
+				isHidden
+				formatString: 0
+				summarizeBy: none
+				sourceColumn: segment_order
+
+				annotation SummarizationSetBy = User
+
+			partition 'Player Summary' = m
+				mode: import
+				source =
+					let
+						Source = Csv.Document(File.Contents(DataFolder & "\player_summary.csv"), [Delimiter = ",", Encoding = 65001, QuoteStyle = QuoteStyle.Csv]),
+						Promoted = Table.PromoteHeaders(Source, [PromoteAllScalars = true]),
+						Kept = Table.SelectColumns(Promoted, {"assignment_id", "player_id", "campaign_name", "property", "player_segment", "group", "offer_value", "pre_revenue", "response_revenue", "promo_cost", "returned", "redeemed", "net_revenue"}),
+						Typed = Table.TransformColumnTypes(Kept, {{"assignment_id", type text}, {"player_id", type text}, {"campaign_name", type text}, {"property", type text}, {"player_segment", type text}, {"group", type text}, {"offer_value", type number}, {"pre_revenue", type number}, {"response_revenue", type number}, {"promo_cost", type number}, {"returned", type logical}, {"redeemed", type logical}, {"net_revenue", type number}}, "en-US"),
+						ProperCase = Table.TransformColumns(Typed, {{"group", Text.Proper, type text}}),
+						SegmentOrder = Table.AddColumn(ProperCase, "segment_order", each if [player_segment] = "New" then 1 else if [player_segment] = "Core" then 2 else if [player_segment] = "VIP" then 3 else 0, Int64.Type)
+					in
+						SegmentOrder
+
+		/// One row per cleaned gaming visit, labeled by timing relative to the player's assignment. Source: visits.csv.
+		table 'Visits'
+
+			/// Unique visit ID.
+			column 'visit_id'
+				dataType: string
+				summarizeBy: none
+				sourceColumn: visit_id
+
+				annotation SummarizationSetBy = User
+
+			/// Player who made the visit. Key to Player Summary.
+			column 'player_id'
+				dataType: string
+				summarizeBy: none
+				sourceColumn: player_id
+
+				annotation SummarizationSetBy = User
+
+			/// Date of the visit.
+			column 'visit_date'
+				dataType: dateTime
+				formatString: yyyy-mm-dd
+				summarizeBy: none
+				sourceColumn: visit_date
+
+				annotation SummarizationSetBy = User
+
+			/// Casino's net gaming revenue for the visit. Negative when the player wins.
+			column 'gaming_revenue'
+				dataType: double
+				formatString: \$#,0.00;-\$#,0.00;\$#,0.00
+				summarizeBy: sum
+				sourceColumn: gaming_revenue
+
+				annotation SummarizationSetBy = User
+				annotation PBI_FormatHint = {"currencyCulture":"en-US"}
+
+			/// pre = 28 days before assignment; response = 14-day window; outside = neither (ignored).
+			column 'period'
+				dataType: string
+				summarizeBy: none
+				sourceColumn: period
+
+				annotation SummarizationSetBy = User
+
+			partition 'Visits' = m
+				mode: import
+				source =
+					let
+						Source = Csv.Document(File.Contents(DataFolder & "\visits.csv"), [Delimiter = ",", Encoding = 65001, QuoteStyle = QuoteStyle.Csv]),
+						Promoted = Table.PromoteHeaders(Source, [PromoteAllScalars = true]),
+						Kept = Table.SelectColumns(Promoted, {"visit_id", "player_id", "visit_date", "gaming_revenue", "period"}),
+						Typed = Table.TransformColumnTypes(Kept, {{"visit_id", type text}, {"player_id", type text}, {"visit_date", type date}, {"gaming_revenue", type number}, {"period", type text}}, "en-US")
+					in
+						Typed
+
+		/// One row per valid redemption (at most one per assignment) after cleaning. Source: redemptions.csv.
+		table 'Redemptions'
+
+			/// Unique redemption ID.
+			column 'redemption_id'
+				dataType: string
+				summarizeBy: none
+				sourceColumn: redemption_id
+
+				annotation SummarizationSetBy = User
+
+			/// Assignment the offer belonged to. Key to Player Summary.
+			column 'assignment_id'
+				dataType: string
+				summarizeBy: none
+				sourceColumn: assignment_id
+
+				annotation SummarizationSetBy = User
+
+			/// Promotional cost of the redemption.
+			column 'promo_cost'
+				dataType: double
+				formatString: \$#,0.00;-\$#,0.00;\$#,0.00
+				summarizeBy: sum
+				sourceColumn: promo_cost
+
+				annotation SummarizationSetBy = User
+				annotation PBI_FormatHint = {"currencyCulture":"en-US"}
+
+			partition 'Redemptions' = m
+				mode: import
+				source =
+					let
+						Source = Csv.Document(File.Contents(DataFolder & "\redemptions.csv"), [Delimiter = ",", Encoding = 65001, QuoteStyle = QuoteStyle.Csv]),
+						Promoted = Table.PromoteHeaders(Source, [PromoteAllScalars = true]),
+						Kept = Table.SelectColumns(Promoted, {"redemption_id", "assignment_id", "promo_cost"}),
+						Typed = Table.TransformColumnTypes(Kept, {{"redemption_id", type text}, {"assignment_id", type text}, {"promo_cost", type number}}, "en-US")
+					in
+						Typed
+
+		/// Pre-calculated offer-vs-holdout results with 95% confidence intervals, one row per slice. Filter 'breakdown' to one level (e.g. Campaign) before using it in a visual. Source: campaign_results.csv.
+		table 'Campaign Results'
+
+			/// Level of the slice: Overall, Campaign, Segment, Property, or Campaign x Segment.
+			column 'breakdown'
+				dataType: string
+				summarizeBy: none
+				sourceColumn: breakdown
+
+				annotation SummarizationSetBy = User
+
+			/// Campaign for this row, or All.
+			column 'campaign_name'
+				dataType: string
+				summarizeBy: none
+				sourceColumn: campaign_name
+
+				annotation SummarizationSetBy = User
+
+			/// Segment for this row, or All.
+			column 'player_segment'
+				dataType: string
+				summarizeBy: none
+				sourceColumn: player_segment
+				sortByColumn: segment_order
+
+				annotation SummarizationSetBy = User
+
+			/// Property for this row, or All.
+			column 'property'
+				dataType: string
+				summarizeBy: none
+				sourceColumn: property
+
+				annotation SummarizationSetBy = User
+
+			/// Number of offered players in the slice.
+			column 'offer_players'
+				dataType: int64
+				formatString: #,0
+				summarizeBy: sum
+				sourceColumn: offer_players
+
+				annotation SummarizationSetBy = User
+
+			/// Number of held-out players in the slice.
+			column 'holdout_players'
+				dataType: int64
+				formatString: #,0
+				summarizeBy: sum
+				sourceColumn: holdout_players
+
+				annotation SummarizationSetBy = User
+
+			/// Return rate difference, offer minus holdout (percentage points).
+			column 'return_rate_lift'
+				dataType: double
+				formatString: 0.0%
+				summarizeBy: none
+				sourceColumn: return_rate_lift
+
+				annotation SummarizationSetBy = User
+
+			/// Share of offered players who redeemed.
+			column 'redemption_rate'
+				dataType: double
+				formatString: 0.0%
+				summarizeBy: none
+				sourceColumn: redemption_rate
+
+				annotation SummarizationSetBy = User
+
+			/// Average promo cost per offered player (including non-redeemers).
+			column 'promo_cost_per_offer'
+				dataType: double
+				formatString: \$#,0.00;-\$#,0.00;\$#,0.00
+				summarizeBy: none
+				sourceColumn: promo_cost_per_offer
+
+				annotation SummarizationSetBy = User
+				annotation PBI_FormatHint = {"currencyCulture":"en-US"}
+
+			/// Net revenue difference per offered player after promo cost. The main result.
+			column 'net_lift'
+				dataType: double
+				formatString: \$#,0.00;-\$#,0.00;\$#,0.00
+				summarizeBy: none
+				sourceColumn: net_lift
+
+				annotation SummarizationSetBy = User
+				annotation PBI_FormatHint = {"currencyCulture":"en-US"}
+
+			/// Lower end of the 95% confidence interval for net lift.
+			column 'net_lift_low'
+				dataType: double
+				formatString: \$#,0.00;-\$#,0.00;\$#,0.00
+				summarizeBy: none
+				sourceColumn: net_lift_low
+
+				annotation SummarizationSetBy = User
+				annotation PBI_FormatHint = {"currencyCulture":"en-US"}
+
+			/// Upper end of the 95% confidence interval for net lift.
+			column 'net_lift_high'
+				dataType: double
+				formatString: \$#,0.00;-\$#,0.00;\$#,0.00
+				summarizeBy: none
+				sourceColumn: net_lift_high
+
+				annotation SummarizationSetBy = User
+				annotation PBI_FormatHint = {"currencyCulture":"en-US"}
+
+			/// Net lift x offered players: total dollars beyond what would have happened anyway.
+			column 'total_net_impact'
+				dataType: double
+				formatString: \$#,0.00;-\$#,0.00;\$#,0.00
+				summarizeBy: none
+				sourceColumn: total_net_impact
+
+				annotation SummarizationSetBy = User
+				annotation PBI_FormatHint = {"currencyCulture":"en-US"}
+
+			/// Positive = whole interval above $0; Negative = below $0; Inconclusive = crosses $0.
+			column 'verdict'
+				dataType: string
+				summarizeBy: none
+				sourceColumn: verdict
+
+				annotation SummarizationSetBy = User
+
+			/// Hidden helper that sorts player_segment as New, Core, VIP (All = 0).
+			column 'segment_order'
+				dataType: int64
+				isHidden
+				formatString: 0
+				summarizeBy: none
+				sourceColumn: segment_order
+
+				annotation SummarizationSetBy = User
+
+			/// Readable label for the row's slice (e.g. 'Weekend Match' or 'Weekend Match - VIP'). Use on chart axes.
+			column 'Slice' = SWITCH('Campaign Results'[breakdown], "Overall", "All players", "Campaign", 'Campaign Results'[campaign_name], "Segment", 'Campaign Results'[player_segment], "Property", 'Campaign Results'[property], 'Campaign Results'[campaign_name] & " - " & 'Campaign Results'[player_segment])
+				dataType: string
+				summarizeBy: none
+
+			/// Net lift with its 95% confidence interval as text, e.g. '$17.08 ($12.26 to $22.30)'. For tables and tooltips.
+			column 'Net Lift Range' = FORMAT('Campaign Results'[net_lift], "$#,0.00") & " (" & FORMAT('Campaign Results'[net_lift_low], "$#,0.00") & " to " & FORMAT('Campaign Results'[net_lift_high], "$#,0.00") & ")"
+				dataType: string
+				summarizeBy: none
+
+			partition 'Campaign Results' = m
+				mode: import
+				source =
+					let
+						Source = Csv.Document(File.Contents(DataFolder & "\campaign_results.csv"), [Delimiter = ",", Encoding = 65001, QuoteStyle = QuoteStyle.Csv]),
+						Promoted = Table.PromoteHeaders(Source, [PromoteAllScalars = true]),
+						Kept = Table.SelectColumns(Promoted, {"breakdown", "campaign_name", "player_segment", "property", "offer_players", "holdout_players", "return_rate_lift", "redemption_rate", "promo_cost_per_offer", "net_lift", "net_lift_low", "net_lift_high", "total_net_impact", "verdict"}),
+						Typed = Table.TransformColumnTypes(Kept, {{"breakdown", type text}, {"campaign_name", type text}, {"player_segment", type text}, {"property", type text}, {"offer_players", Int64.Type}, {"holdout_players", Int64.Type}, {"return_rate_lift", type number}, {"redemption_rate", type number}, {"promo_cost_per_offer", type number}, {"net_lift", type number}, {"net_lift_low", type number}, {"net_lift_high", type number}, {"total_net_impact", type number}, {"verdict", type text}}, "en-US"),
+						SegmentOrder = Table.AddColumn(Typed, "segment_order", each if [player_segment] = "New" then 1 else if [player_segment] = "Core" then 2 else if [player_segment] = "VIP" then 3 else 0, Int64.Type)
+					in
+						SegmentOrder
+
+		/// Holds all DAX measures. Contains no data.
+		table 'Key Measures'
+
+			/// Number of assigned players in the current filter. Helper used by other measures.
+			measure 'Players' = COUNTROWS('Player Summary')
+				isHidden
+				formatString: #,0
+
+			/// Share of players who visited during the response window. Helper used by other measures.
+			measure 'Return Rate' = DIVIDE(CALCULATE([Players], 'Player Summary'[returned] = TRUE()), [Players])
+				isHidden
+				formatString: 0.0%
+
+			/// Net gain per offered player after promo cost: the main result. Matches Campaign Results[net_lift].
+			measure 'Net Lift per Player' = [Avg Net Revenue (Offer)] - [Avg Net Revenue (Holdout)]
+				formatString: \$#,0.00;-\$#,0.00;\$#,0.00
+
+				annotation PBI_FormatHint = {"currencyCulture":"en-US"}
+
+			/// Total net dollars the offers generated beyond what would have happened anyway.
+			measure 'Total Net Impact' = [Net Lift per Player] * [Offer Players]
+				formatString: \$#,0.00;-\$#,0.00;\$#,0.00
+
+				annotation PBI_FormatHint = {"currencyCulture":"en-US"}
+
+			/// Extra share of players who returned because of the offer (percentage points).
+			measure 'Return Rate Lift' = [Return Rate (Offer)] - [Return Rate (Holdout)]
+				formatString: 0.0%
+
+			/// Share of offered players who redeemed the offer.
+			measure 'Redemption Rate' = DIVIDE(CALCULATE([Players], 'Player Summary'[redeemed] = TRUE(), 'Player Summary'[group] = "Offer"), [Offer Players])
+				formatString: 0.0%
+
+			/// Net lift from Campaign Results. Shows a value only when one result row is in context (filter 'breakdown' first).
+			measure 'Result Net Lift' = IF(COUNTROWS('Campaign Results') = 1, SUM('Campaign Results'[net_lift]))
+				formatString: \$#,0.00;-\$#,0.00;\$#,0.00
+
+				annotation PBI_FormatHint = {"currencyCulture":"en-US"}
+
+			/// Lower 95% bound of net lift. Use as the lower error bar.
+			measure 'Result Net Lift Low' = IF(COUNTROWS('Campaign Results') = 1, SUM('Campaign Results'[net_lift_low]))
+				formatString: \$#,0.00;-\$#,0.00;\$#,0.00
+
+				annotation PBI_FormatHint = {"currencyCulture":"en-US"}
+
+			/// Upper 95% bound of net lift. Use as the upper error bar.
+			measure 'Result Net Lift High' = IF(COUNTROWS('Campaign Results') = 1, SUM('Campaign Results'[net_lift_high]))
+				formatString: \$#,0.00;-\$#,0.00;\$#,0.00
+
+				annotation PBI_FormatHint = {"currencyCulture":"en-US"}
+
+			/// Number of players who received an offer.
+			measure 'Offer Players' = CALCULATE([Players], 'Player Summary'[group] = "Offer")
+				formatString: #,0
+
+			/// Number of players held out for comparison.
+			measure 'Holdout Players' = CALCULATE([Players], 'Player Summary'[group] = "Holdout")
+				formatString: #,0
+
+			/// Return rate among offered players.
+			measure 'Return Rate (Offer)' = CALCULATE([Return Rate], 'Player Summary'[group] = "Offer")
+				formatString: 0.0%
+
+			/// Return rate among held-out players: what happens without an offer.
+			measure 'Return Rate (Holdout)' = CALCULATE([Return Rate], 'Player Summary'[group] = "Holdout")
+				formatString: 0.0%
+
+			/// Average response-window revenue per offered player, before promo cost.
+			measure 'Avg Revenue (Offer)' = CALCULATE(AVERAGE('Player Summary'[response_revenue]), 'Player Summary'[group] = "Offer")
+				formatString: \$#,0.00;-\$#,0.00;\$#,0.00
+
+				annotation PBI_FormatHint = {"currencyCulture":"en-US"}
+
+			/// Average response-window revenue per held-out player.
+			measure 'Avg Revenue (Holdout)' = CALCULATE(AVERAGE('Player Summary'[response_revenue]), 'Player Summary'[group] = "Holdout")
+				formatString: \$#,0.00;-\$#,0.00;\$#,0.00
+
+				annotation PBI_FormatHint = {"currencyCulture":"en-US"}
+
+			/// Average promo cost per offered player, including those who did not redeem.
+			measure 'Avg Promo Cost per Offer Player' = CALCULATE(AVERAGE('Player Summary'[promo_cost]), 'Player Summary'[group] = "Offer")
+				formatString: \$#,0.00;-\$#,0.00;\$#,0.00
+
+				annotation PBI_FormatHint = {"currencyCulture":"en-US"}
+
+			/// Average revenue minus promo cost per offered player.
+			measure 'Avg Net Revenue (Offer)' = CALCULATE(AVERAGE('Player Summary'[net_revenue]), 'Player Summary'[group] = "Offer")
+				formatString: \$#,0.00;-\$#,0.00;\$#,0.00
+
+				annotation PBI_FormatHint = {"currencyCulture":"en-US"}
+
+			/// Average revenue per held-out player (no promo cost).
+			measure 'Avg Net Revenue (Holdout)' = CALCULATE(AVERAGE('Player Summary'[net_revenue]), 'Player Summary'[group] = "Holdout")
+				formatString: \$#,0.00;-\$#,0.00;\$#,0.00
+
+				annotation PBI_FormatHint = {"currencyCulture":"en-US"}
+
+			/// Average revenue per offered player in the 28 days before assignment (should match holdout).
+			measure 'Avg Pre Revenue (Offer)' = CALCULATE(AVERAGE('Player Summary'[pre_revenue]), 'Player Summary'[group] = "Offer")
+				formatString: \$#,0.00;-\$#,0.00;\$#,0.00
+
+				annotation PBI_FormatHint = {"currencyCulture":"en-US"}
+
+			/// Average revenue per held-out player in the 28 days before assignment.
+			measure 'Avg Pre Revenue (Holdout)' = CALCULATE(AVERAGE('Player Summary'[pre_revenue]), 'Player Summary'[group] = "Holdout")
+				formatString: \$#,0.00;-\$#,0.00;\$#,0.00
+
+				annotation PBI_FormatHint = {"currencyCulture":"en-US"}
+
+			column Value
+				isHidden
+				formatString: 0
+				summarizeBy: none
+				isNameInferred
+				sourceColumn: [Value]
+
+			partition 'Key Measures' = calculated
+				mode: import
+				source = {1}
+
+		/// Documentation of every table, column, calculated column, measure and parameter in this model. Use slicers on Object Type and Table to look up any field.
+		table 'Data Dictionary'
+
+			/// Kind of object: Table, Column, Calculated column, Measure or Parameter.
+			column 'Object Type'
+				summarizeBy: none
+				isNameInferred
+				sourceColumn: [Object Type]
+
+			/// Table the object belongs to (measures all live in the Key Measures table).
+			column 'Table'
+				summarizeBy: none
+				isNameInferred
+				sourceColumn: [Table]
+
+			/// Name of the object as it appears in the Data pane.
+			column 'Name'
+				summarizeBy: none
+				isNameInferred
+				sourceColumn: [Name]
+
+			/// Short plain-language definition.
+			column 'Description'
+				summarizeBy: none
+				isNameInferred
+				sourceColumn: [Description]
+
+			/// How the object's table connects to the rest of the model.
+			column 'Relationships'
+				summarizeBy: none
+				isNameInferred
+				sourceColumn: [Relationships]
+
+			partition 'Data Dictionary' = calculated
+				mode: import
+				source =
+					DATATABLE(
+						"Object Type", STRING, "Table", STRING, "Name", STRING, "Description", STRING, "Relationships", STRING,
+						{
+							{ "Parameter", "(model)", "DataFolder", "Folder containing the pipeline's output CSVs (data/output). Change it in Transform data > Edit parameters, then Refresh.", "Used by every table's query" },
+							{ "Table", "Player Summary", "Player Summary", "One row per player (campaign assignment): who was offered or held out, and their activity before and during the 14-day response window. The main analysis table. Source: player_summary.csv.", "1-to-many with Visits (player_id); 1-to-many with Redemptions (assignment_id)" },
+							{ "Column", "Player Summary", "assignment_id", "Unique ID of the player's campaign assignment. Key to Redemptions.", "1-to-many with Visits (player_id); 1-to-many with Redemptions (assignment_id)" },
+							{ "Column", "Player Summary", "player_id", "Unique player ID. Each player has exactly one assignment. Key to Visits.", "1-to-many with Visits (player_id); 1-to-many with Redemptions (assignment_id)" },
+							{ "Column", "Player Summary", "campaign_name", "Campaign: Weekend Match, Dining Credit, Midweek Play or New Member Welcome.", "1-to-many with Visits (player_id); 1-to-many with Redemptions (assignment_id)" },
+							{ "Column", "Player Summary", "property", "Casino property the player was assigned at (Harbor Casino or Ridge Casino).", "1-to-many with Visits (player_id); 1-to-many with Redemptions (assignment_id)" },
+							{ "Column", "Player Summary", "player_segment", "Player segment: New, Core or VIP.", "1-to-many with Visits (player_id); 1-to-many with Redemptions (assignment_id)" },
+							{ "Column", "Player Summary", "group", "Offer = received the offer; Holdout = randomly held out for comparison.", "1-to-many with Visits (player_id); 1-to-many with Redemptions (assignment_id)" },
+							{ "Column", "Player Summary", "offer_value", "Dollar value of the offer. Blank for holdout players.", "1-to-many with Visits (player_id); 1-to-many with Redemptions (assignment_id)" },
+							{ "Column", "Player Summary", "pre_revenue", "Gaming revenue in the 28 days before assignment. Used to check the groups started out alike.", "1-to-many with Visits (player_id); 1-to-many with Redemptions (assignment_id)" },
+							{ "Column", "Player Summary", "response_revenue", "Gaming revenue in the 14-day response window. Can be negative when a player wins.", "1-to-many with Visits (player_id); 1-to-many with Redemptions (assignment_id)" },
+							{ "Column", "Player Summary", "promo_cost", "Cost of the player's redemption; 0 if they did not redeem.", "1-to-many with Visits (player_id); 1-to-many with Redemptions (assignment_id)" },
+							{ "Column", "Player Summary", "returned", "TRUE if the player visited during the 14-day response window.", "1-to-many with Visits (player_id); 1-to-many with Redemptions (assignment_id)" },
+							{ "Column", "Player Summary", "redeemed", "TRUE if the player redeemed their offer (offer group only).", "1-to-many with Visits (player_id); 1-to-many with Redemptions (assignment_id)" },
+							{ "Column", "Player Summary", "net_revenue", "Response-window revenue minus promo cost.", "1-to-many with Visits (player_id); 1-to-many with Redemptions (assignment_id)" },
+							{ "Column", "Player Summary", "segment_order", "Hidden helper that sorts player_segment as New, Core, VIP (All = 0).", "1-to-many with Visits (player_id); 1-to-many with Redemptions (assignment_id)" },
+							{ "Table", "Visits", "Visits", "One row per cleaned gaming visit, labeled by timing relative to the player's assignment. Source: visits.csv.", "Many-to-1 with Player Summary (player_id)" },
+							{ "Column", "Visits", "visit_id", "Unique visit ID.", "Many-to-1 with Player Summary (player_id)" },
+							{ "Column", "Visits", "player_id", "Player who made the visit. Key to Player Summary.", "Many-to-1 with Player Summary (player_id)" },
+							{ "Column", "Visits", "visit_date", "Date of the visit.", "Many-to-1 with Player Summary (player_id)" },
+							{ "Column", "Visits", "gaming_revenue", "Casino's net gaming revenue for the visit. Negative when the player wins.", "Many-to-1 with Player Summary (player_id)" },
+							{ "Column", "Visits", "period", "pre = 28 days before assignment; response = 14-day window; outside = neither (ignored).", "Many-to-1 with Player Summary (player_id)" },
+							{ "Table", "Redemptions", "Redemptions", "One row per valid redemption (at most one per assignment) after cleaning. Source: redemptions.csv.", "Many-to-1 with Player Summary (assignment_id)" },
+							{ "Column", "Redemptions", "redemption_id", "Unique redemption ID.", "Many-to-1 with Player Summary (assignment_id)" },
+							{ "Column", "Redemptions", "assignment_id", "Assignment the offer belonged to. Key to Player Summary.", "Many-to-1 with Player Summary (assignment_id)" },
+							{ "Column", "Redemptions", "promo_cost", "Promotional cost of the redemption.", "Many-to-1 with Player Summary (assignment_id)" },
+							{ "Table", "Campaign Results", "Campaign Results", "Pre-calculated offer-vs-holdout results with 95% confidence intervals, one row per slice. Filter 'breakdown' to one level (e.g. Campaign) before using it in a visual. Source: campaign_results.csv.", "Standalone (pre-calculated results; not related)" },
+							{ "Column", "Campaign Results", "breakdown", "Level of the slice: Overall, Campaign, Segment, Property, or Campaign x Segment.", "Standalone (pre-calculated results; not related)" },
+							{ "Column", "Campaign Results", "campaign_name", "Campaign for this row, or All.", "Standalone (pre-calculated results; not related)" },
+							{ "Column", "Campaign Results", "player_segment", "Segment for this row, or All.", "Standalone (pre-calculated results; not related)" },
+							{ "Column", "Campaign Results", "property", "Property for this row, or All.", "Standalone (pre-calculated results; not related)" },
+							{ "Column", "Campaign Results", "offer_players", "Number of offered players in the slice.", "Standalone (pre-calculated results; not related)" },
+							{ "Column", "Campaign Results", "holdout_players", "Number of held-out players in the slice.", "Standalone (pre-calculated results; not related)" },
+							{ "Column", "Campaign Results", "return_rate_lift", "Return rate difference, offer minus holdout (percentage points).", "Standalone (pre-calculated results; not related)" },
+							{ "Column", "Campaign Results", "redemption_rate", "Share of offered players who redeemed.", "Standalone (pre-calculated results; not related)" },
+							{ "Column", "Campaign Results", "promo_cost_per_offer", "Average promo cost per offered player (including non-redeemers).", "Standalone (pre-calculated results; not related)" },
+							{ "Column", "Campaign Results", "net_lift", "Net revenue difference per offered player after promo cost. The main result.", "Standalone (pre-calculated results; not related)" },
+							{ "Column", "Campaign Results", "net_lift_low", "Lower end of the 95% confidence interval for net lift.", "Standalone (pre-calculated results; not related)" },
+							{ "Column", "Campaign Results", "net_lift_high", "Upper end of the 95% confidence interval for net lift.", "Standalone (pre-calculated results; not related)" },
+							{ "Column", "Campaign Results", "total_net_impact", "Net lift x offered players: total dollars beyond what would have happened anyway.", "Standalone (pre-calculated results; not related)" },
+							{ "Column", "Campaign Results", "verdict", "Positive = whole interval above $0; Negative = below $0; Inconclusive = crosses $0.", "Standalone (pre-calculated results; not related)" },
+							{ "Column", "Campaign Results", "segment_order", "Hidden helper that sorts player_segment as New, Core, VIP (All = 0).", "Standalone (pre-calculated results; not related)" },
+							{ "Calculated column", "Campaign Results", "Slice", "Readable label for the row's slice (e.g. 'Weekend Match' or 'Weekend Match - VIP'). Use on chart axes.", "Standalone (pre-calculated results; not related)" },
+							{ "Calculated column", "Campaign Results", "Net Lift Range", "Net lift with its 95% confidence interval as text, e.g. '$17.08 ($12.26 to $22.30)'. For tables and tooltips.", "Standalone (pre-calculated results; not related)" },
+							{ "Table", "Key Measures", "Key Measures", "Holds all DAX measures. Contains no data.", "Measures only (no data)" },
+							{ "Measure", "Key Measures", "Players", "Number of assigned players in the current filter. Helper used by other measures.", "Measures only (no data)" },
+							{ "Measure", "Key Measures", "Return Rate", "Share of players who visited during the response window. Helper used by other measures.", "Measures only (no data)" },
+							{ "Measure", "Key Measures", "Net Lift per Player", "Net gain per offered player after promo cost: the main result. Matches Campaign Results[net_lift].", "Measures only (no data)" },
+							{ "Measure", "Key Measures", "Total Net Impact", "Total net dollars the offers generated beyond what would have happened anyway.", "Measures only (no data)" },
+							{ "Measure", "Key Measures", "Return Rate Lift", "Extra share of players who returned because of the offer (percentage points).", "Measures only (no data)" },
+							{ "Measure", "Key Measures", "Redemption Rate", "Share of offered players who redeemed the offer.", "Measures only (no data)" },
+							{ "Measure", "Key Measures", "Result Net Lift", "Net lift from Campaign Results. Shows a value only when one result row is in context (filter 'breakdown' first).", "Measures only (no data)" },
+							{ "Measure", "Key Measures", "Result Net Lift Low", "Lower 95% bound of net lift. Use as the lower error bar.", "Measures only (no data)" },
+							{ "Measure", "Key Measures", "Result Net Lift High", "Upper 95% bound of net lift. Use as the upper error bar.", "Measures only (no data)" },
+							{ "Measure", "Key Measures", "Offer Players", "Number of players who received an offer.", "Measures only (no data)" },
+							{ "Measure", "Key Measures", "Holdout Players", "Number of players held out for comparison.", "Measures only (no data)" },
+							{ "Measure", "Key Measures", "Return Rate (Offer)", "Return rate among offered players.", "Measures only (no data)" },
+							{ "Measure", "Key Measures", "Return Rate (Holdout)", "Return rate among held-out players: what happens without an offer.", "Measures only (no data)" },
+							{ "Measure", "Key Measures", "Avg Revenue (Offer)", "Average response-window revenue per offered player, before promo cost.", "Measures only (no data)" },
+							{ "Measure", "Key Measures", "Avg Revenue (Holdout)", "Average response-window revenue per held-out player.", "Measures only (no data)" },
+							{ "Measure", "Key Measures", "Avg Promo Cost per Offer Player", "Average promo cost per offered player, including those who did not redeem.", "Measures only (no data)" },
+							{ "Measure", "Key Measures", "Avg Net Revenue (Offer)", "Average revenue minus promo cost per offered player.", "Measures only (no data)" },
+							{ "Measure", "Key Measures", "Avg Net Revenue (Holdout)", "Average revenue per held-out player (no promo cost).", "Measures only (no data)" },
+							{ "Measure", "Key Measures", "Avg Pre Revenue (Offer)", "Average revenue per offered player in the 28 days before assignment (should match holdout).", "Measures only (no data)" },
+							{ "Measure", "Key Measures", "Avg Pre Revenue (Holdout)", "Average revenue per held-out player in the 28 days before assignment.", "Measures only (no data)" },
+							{ "Table", "Data Dictionary", "Data Dictionary", "Documentation of every table, column, calculated column, measure and parameter in this model. Use slicers on Object Type and Table to look up any field.", "Standalone (documentation)" },
+							{ "Column", "Data Dictionary", "Object Type", "Kind of object: Table, Column, Calculated column, Measure or Parameter.", "Standalone (documentation)" },
+							{ "Column", "Data Dictionary", "Table", "Table the object belongs to (measures all live in the Key Measures table).", "Standalone (documentation)" },
+							{ "Column", "Data Dictionary", "Name", "Name of the object as it appears in the Data pane.", "Standalone (documentation)" },
+							{ "Column", "Data Dictionary", "Description", "Short plain-language definition.", "Standalone (documentation)" },
+							{ "Column", "Data Dictionary", "Relationships", "How the object's table connects to the rest of the model.", "Standalone (documentation)" }
+						}
+					)
+
+		relationship 'Visits to Player Summary'
+			fromColumn: 'Visits'.player_id
+			toColumn: 'Player Summary'.player_id
+
+		relationship 'Redemptions to Player Summary'
+			fromColumn: 'Redemptions'.assignment_id
+			toColumn: 'Player Summary'.assignment_id
+
